@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "name": "AppMovil API Cloud",
+    "slug": "appmovil-api-cloud",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000010"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.appmovil.apicloud"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#000010"
+      },
+      "package": "com.appmovil.apicloud",
+      "googleServicesFile": "./google-services.json"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-font",
+        {
+          "fonts": []
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "appmovil-api-cloud"
+      }
+    }
+  }
+}
