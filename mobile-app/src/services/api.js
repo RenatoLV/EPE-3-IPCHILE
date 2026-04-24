@@ -11,11 +11,13 @@ export const ApiService = {
   // ── MÓDULO SNAKE BATTLE ROYALE ──────────────────────────────────────────
   
   // GET: Obtener Leaderboard con persistencia en Caché Local
-  getLeaderboard: async () => {
+  getLeaderboard: async (params = '') => {
     try {
-      const response = await apiClient.get('/snake/leaderboard');
+      const response = await apiClient.get(`/snake/leaderboard${params}`);
       // Guardamos en caché para uso offline o si el servidor está lento
-      await AsyncStorage.setItem('@leaderboard_cache', JSON.stringify(response.data.data));
+      if (response.data.data) {
+        await AsyncStorage.setItem('@leaderboard_cache', JSON.stringify(response.data.data));
+      }
       return response.data.data;
     } catch (error) {
       console.warn("[API] Cargando leaderboard desde caché local...");

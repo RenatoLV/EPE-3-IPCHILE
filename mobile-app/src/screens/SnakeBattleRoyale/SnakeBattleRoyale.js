@@ -11,12 +11,14 @@ import {
 import { PanGestureHandler }    from 'react-native-gesture-handler';
 import { useNavigation }        from '@react-navigation/native';
 import { useUniversalControls } from '../../hooks/useUniversalControls';
+import AsyncStorage             from '@react-native-async-storage/async-storage';
 
 import { database, auth }       from '../../services/firebase';
 import { ref, set, onValue, off, remove, onDisconnect } from 'firebase/database';
 import { ApiService }           from '../../services/api';
 
 const DIRS = { UP: [0,-1], DOWN: [0,1], LEFT: [-1,0], RIGHT: [1,0] };
+const PERSONAL_BEST_KEY = '@snake_personal_best';
 
 export default function SnakeBattleRoyale() {
   const navigation = useNavigation();
@@ -40,6 +42,8 @@ export default function SnakeBattleRoyale() {
   const [bots,      setBots]      = useState([]); 
   const [myScore,   setMyScore]   = useState(0);
   const [leaderboard, setLeaderboard] = useState([]);
+  const [personalBest, setPersonalBest] = useState(0);
+  const [leaderboardStatus, setLeaderboardStatus] = useState('loading'); // 'loading' | 'loaded' | 'empty'
   
   const dirRef    = useRef(DIRS.UP);
   const snakeRef  = useRef([{ x: 10, y: 7 }, { x: 10, y: 8 }]);
@@ -48,8 +52,23 @@ export default function SnakeBattleRoyale() {
   const tickTimer = useRef(null);
   const gameRef   = useRef(null);
 
+  // Cargar mejor score personal guardado localmente
   useEffect(() => {
-    ApiService.getLeaderboard().then(data => setLeaderboard(data || [])).catch(() => {});
+    AsyncStorage.getItem(PERSONAL_BEST_KEY).then(val => {
+      if (val) setPersonalBest(parseInt(val) || 0);
+    });
+  }, []);
+
+  // Cargar leaderboard global (puede estar vacío si el servidor se reinició)
+  useEffect(() => {
+    setLeaderboardStatus('loading');
+    // Añadimos un timestamp para evitar el caché 304
+    ApiService.getLeaderboard(`?t=${Date.now()}`)
+      .then(data => {
+        setLeaderboard(data || []);
+        setLeaderboardStatus(data && data.length > 0 ? 'loaded' : 'empty');
+      })
+      .catch(() => setLeaderboardStatus('empty'));
   }, [gameState]);
 
   const handleKeyboardMove = useCallback((dirStr) => {
@@ -191,6 +210,19 @@ export default function SnakeBattleRoyale() {
     clearInterval(tickTimer.current);
     if (gameRef.current) remove(gameRef.current);
     setGameState('gameover');
+    
+    // Actualizar récord personal local si lo superamos
+    try {
+      const val = await AsyncStorage.getItem(PERSONAL_BEST_KEY);
+      const currentBest = parseInt(val) || 0;
+      if (myScore > currentBest) {
+        await AsyncStorage.setItem(PERSONAL_BEST_KEY, String(myScore));
+        setPersonalBest(myScore);
+      }
+    } catch (e) {
+      console.error("Error al guardar record local:", e);
+    }
+    
     try {
       await ApiService.postScore({ playerId, playerName, score: myScore, maxSize: snakeRef.current.length });
     } catch (err) {}
@@ -238,11 +270,28 @@ export default function SnakeBattleRoyale() {
               <Text style={styles.finalScore}>SCORE: {myScore}</Text>
             </View>
           )}
+          {/* Récord Personal — siempre visible localmente */}
+          <View style={styles.personalBestBox}>
+            <Text style={styles.personalBestLabel}>🏆 TU MEJOR PUNTAJE</Text>
+            <Text style={styles.personalBestScore}>{personalBest || '0'}</Text>
+          </View>
+
           <View style={styles.leaderboardBox}>
             <Text style={styles.leaderTitle}>TOP 5 GLOBAL (ÚNICOS)</Text>
-            {leaderboard.length > 0 ? leaderboard.map((entry, i) => (
-              <Text key={i} style={styles.leaderText}>{i+1}. {entry.playerName}: {entry.score}</Text>
-            )) : <Text style={styles.leaderText}>Cargando...</Text>}
+            {leaderboardStatus === 'loading' && (
+              <Text style={styles.leaderText}>Cargando...</Text>
+            )}
+            {leaderboardStatus === 'loaded' && leaderboard.map((entry, i) => (
+              <Text key={i} style={[styles.leaderText, entry.playerId === playerId && styles.leaderTextMe]}>
+                {i+1}. {entry.playerName}: {entry.score}{entry.playerId === playerId ? ' ★' : ''}
+              </Text>
+            ))}
+            {leaderboardStatus === 'empty' && (
+              <Text style={styles.leaderTextEmpty}>
+                Sé el primero en el ranking 🐍{"\n"}
+                (El servidor se reinicia periódicamente)
+              </Text>
+            )}
           </View>
           <TouchableOpacity 
             style={styles.retroButton} 
@@ -296,9 +345,14 @@ const styles = StyleSheet.create({
   gameOverBox: { alignItems: 'center', marginBottom: 20 },
   retroGameOver: { fontFamily: 'monospace', fontSize: 24, color: '#7f1d1d', fontWeight: 'bold' },
   finalScore: { fontSize: 18, color: 'rgba(0,0,0,0.75)', fontWeight: 'bold' },
+  personalBestBox: { backgroundColor: 'rgba(0,0,0,0.08)', padding: 12, borderRadius: 10, width: '100%', marginBottom: 12, alignItems: 'center', borderWidth: 2, borderColor: 'rgba(0,0,0,0.15)' },
+  personalBestLabel: { fontSize: 12, fontWeight: 'bold', color: 'rgba(0,0,0,0.6)', letterSpacing: 1 },
+  personalBestScore: { fontSize: 36, fontWeight: 'bold', color: 'rgba(0,0,0,0.8)', fontFamily: 'monospace' },
   leaderboardBox: { backgroundColor: 'rgba(0,0,0,0.05)', padding: 15, borderRadius: 10, width: '100%', marginBottom: 20 },
   leaderTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 5, color: 'rgba(0,0,0,0.7)' },
   leaderText: { fontSize: 14, color: 'rgba(0,0,0,0.6)', fontFamily: 'monospace' },
+  leaderTextMe: { color: 'rgba(0,80,0,0.8)', fontWeight: 'bold' },
+  leaderTextEmpty: { fontSize: 12, color: 'rgba(0,0,0,0.4)', fontFamily: 'monospace', textAlign: 'center', lineHeight: 20 },
   retroButton: { borderWidth: 3, borderColor: 'rgba(0,0,0,0.75)', paddingVertical: 12, paddingHorizontal: 30, backgroundColor: '#ac6' },
   retroButtonText: { fontSize: 20, fontWeight: 'bold', color: 'rgba(0,0,0,0.75)' },
   backText: { color: 'rgba(0,0,0,0.5)', textDecorationLine: 'underline' }

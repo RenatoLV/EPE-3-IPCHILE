@@ -54,6 +54,12 @@ const limiter = rateLimit({
 });
 app.use('/api', limiter);
 
+// ── Cache Control: Forzar datos frescos en el Leaderboard ───────────────────
+app.use('/api/snake/leaderboard', (req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+  next();
+});
+
 // ── Rutas API ───────────────────────────────────────────────────────────────
 app.use('/api/snake',   snakeRoutes);
 app.use('/api/wildwest', wildWestRoutes);

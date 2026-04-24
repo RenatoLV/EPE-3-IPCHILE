@@ -29,13 +29,15 @@ const snakeModel = {
 
   /** Guarda el puntaje: Solo si es mejor que el anterior del mismo usuario */
   saveScore: ({ playerId, playerName, score, maxSize }) => {
-    // Si el puntaje es 0, no lo guardamos para no ensuciar el ranking
     if (score <= 0) return null;
+
+    console.log(`[Snake] Recibido score: ${score} para ${playerName} (${playerId})`);
 
     const existingIdx = snakeLeaderboard.findIndex(s => s.playerId === playerId);
     
     if (existingIdx !== -1) {
       if (score > snakeLeaderboard[existingIdx].score) {
+        console.log(`[Snake] NUEVO RECORD para ${playerName}: ${score}`);
         snakeLeaderboard[existingIdx] = {
           ...snakeLeaderboard[existingIdx],
           playerName, 
@@ -43,9 +45,12 @@ const snakeModel = {
           maxSize,
           updatedAt: new Date().toISOString()
         };
+      } else {
+        console.log(`[Snake] Score ${score} no superó el récord de ${snakeLeaderboard[existingIdx].score}`);
       }
       return snakeLeaderboard[existingIdx];
     } else {
+      console.log(`[Snake] Primer registro para ${playerName}: ${score}`);
       const entry = { id: uuidv4(), playerId, playerName, score, maxSize, createdAt: new Date().toISOString() };
       snakeLeaderboard.push(entry);
       return entry;
