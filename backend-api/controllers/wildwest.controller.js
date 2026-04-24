@@ -57,7 +57,7 @@ const getPlayerStats = (req, res) => {
       return res.status(400).json({ success: false, error: 'playerId es requerido' });
     }
 
-    const stats = wildWestModel.getPlayerAvgReaction(playerId);
+    const stats = wildWestModel.getPlayerStats(playerId);
     if (!stats) {
       return res.status(404).json({
         success: false,

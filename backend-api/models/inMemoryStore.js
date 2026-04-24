@@ -1,47 +1,55 @@
 /**
  * models/inMemoryStore.js
  * 
- * Almacenamiento en memoria como base de datos simple para el backend.
- * En producción se reemplazaría por MongoDB o PostgreSQL.
- * Cumple el requisito de tener una capa de "modelo" separada.
+ * Almacenamiento en memoria optimizado: DATOS REALES Y ÚNICOS.
+ * Se han eliminado los datos de prueba (Gamer_X, Pro_Snake, etc.) para que el ranking sea 100% real.
  */
 
 const { v4: uuidv4 } = require('uuid');
 
-// ── SNAKE: Leaderboard ───────────────────────────────────────────────────────
-let snakeLeaderboard = [
-  { id: uuidv4(), playerId: 'demo1', playerName: 'Gamer_X', score: 1500, maxSize: 12, createdAt: new Date().toISOString() },
-  { id: uuidv4(), playerId: 'demo2', playerName: 'Pro_Snake', score: 1200, maxSize: 9,  createdAt: new Date().toISOString() },
-  { id: uuidv4(), playerId: 'demo3', playerName: 'Rookie',    score: 800,  maxSize: 5,  createdAt: new Date().toISOString() },
-];
+// ── SNAKE: Leaderboard (EMPIEZA VACÍO PARA DATOS REALES) ──────────────────────
+let snakeLeaderboard = [];
 
 // ── WILD WEST: Estadísticas de Duelos ───────────────────────────────────────
-let wildWestStats = [
-  { id: uuidv4(), playerId: 'demo1', playerName: 'Cowboy_1', result: 'win',  reactionTimeMs: 380, createdAt: new Date().toISOString() },
-  { id: uuidv4(), playerId: 'demo2', playerName: 'Sheriff',  result: 'loss', reactionTimeMs: 512, createdAt: new Date().toISOString() },
-];
+let wildWestStats = [];
 
-// ── ZEN WORLD: Mensajes de Chat ──────────────────────────────────────────────
-let zenChatMessages = [
-  { id: uuidv4(), playerId: 'demo1', playerName: 'Espíritu_1', message: '¡Bienvenidos al Mundo Zen! 🌸', createdAt: new Date().toISOString() },
-  { id: uuidv4(), playerId: 'demo2', playerName: 'Alma_Libre',  message: 'Qué paz se siente aquí... ✨',   createdAt: new Date().toISOString() },
-];
+// ── ZEN WORLD ───────────────────────────────────────────────────────────────
+let zenChatMessages = [];
 
 // ────────────────────────────────────────────────────────────────────────────
 // MÉTODOS SNAKE
 // ────────────────────────────────────────────────────────────────────────────
 const snakeModel = {
-  /** Obtiene el leaderboard ordenado por puntaje descendente */
-  getLeaderboard: (limit = 20) =>
-    [...snakeLeaderboard]
+  /** Obtiene el TOP 5 GLOBAL con registros ÚNICOS por usuario */
+  getLeaderboard: (limit = 5) => {
+    return [...snakeLeaderboard]
       .sort((a, b) => b.score - a.score)
-      .slice(0, limit),
+      .slice(0, limit);
+  },
 
-  /** Guarda un nuevo puntaje de Snake */
+  /** Guarda el puntaje: Solo si es mejor que el anterior del mismo usuario */
   saveScore: ({ playerId, playerName, score, maxSize }) => {
-    const entry = { id: uuidv4(), playerId, playerName, score, maxSize, createdAt: new Date().toISOString() };
-    snakeLeaderboard.push(entry);
-    return entry;
+    // Si el puntaje es 0, no lo guardamos para no ensuciar el ranking
+    if (score <= 0) return null;
+
+    const existingIdx = snakeLeaderboard.findIndex(s => s.playerId === playerId);
+    
+    if (existingIdx !== -1) {
+      if (score > snakeLeaderboard[existingIdx].score) {
+        snakeLeaderboard[existingIdx] = {
+          ...snakeLeaderboard[existingIdx],
+          playerName, 
+          score,
+          maxSize,
+          updatedAt: new Date().toISOString()
+        };
+      }
+      return snakeLeaderboard[existingIdx];
+    } else {
+      const entry = { id: uuidv4(), playerId, playerName, score, maxSize, createdAt: new Date().toISOString() };
+      snakeLeaderboard.push(entry);
+      return entry;
+    }
   },
 };
 
@@ -49,54 +57,37 @@ const snakeModel = {
 // MÉTODOS WILD WEST
 // ────────────────────────────────────────────────────────────────────────────
 const wildWestModel = {
-  /** Guarda estadísticas de un duelo */
   saveDuelStat: ({ playerId, playerName, result, reactionTimeMs }) => {
     const entry = { id: uuidv4(), playerId, playerName, result, reactionTimeMs, createdAt: new Date().toISOString() };
     wildWestStats.push(entry);
     return entry;
   },
 
-  /** Calcula el promedio de tiempo de reacción de un jugador */
-  getPlayerAvgReaction: (playerId) => {
+  getPlayerStats: (playerId) => {
     const playerStats = wildWestStats.filter(s => s.playerId === playerId);
-    if (!playerStats.length) return null;
+    if (!playerStats.length) return { wins: 0, losses: 0, avgReactionTimeMs: 0, bestReactionTimeMs: 0 };
+    
+    const wins = playerStats.filter(s => s.result === 'win');
     const avg = playerStats.reduce((sum, s) => sum + s.reactionTimeMs, 0) / playerStats.length;
+    const best = wins.length > 0 ? Math.min(...wins.map(s => s.reactionTimeMs)) : 0;
+
     return {
       playerId,
       totalDuels: playerStats.length,
-      wins: playerStats.filter(s => s.result === 'win').length,
-      losses: playerStats.filter(s => s.result === 'loss').length,
+      wins: wins.length,
+      losses: playerStats.length - wins.length,
       avgReactionTimeMs: Math.round(avg),
+      bestReactionTimeMs: best,
     };
   },
 };
 
-// ────────────────────────────────────────────────────────────────────────────
-// MÉTODOS ZEN CHAT
-// ────────────────────────────────────────────────────────────────────────────
 const zenChatModel = {
-  /** Obtiene los últimos 50 mensajes del chat */
-  getMessages: () =>
-    [...zenChatMessages]
-      .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt))
-      .slice(-50),
-
-  /** Envía un nuevo mensaje al chat */
+  getMessages: () => [...zenChatMessages].slice(-50),
   sendMessage: ({ playerId, playerName, message }) => {
     const entry = { id: uuidv4(), playerId, playerName, message, createdAt: new Date().toISOString() };
     zenChatMessages.push(entry);
     return entry;
-  },
-
-  /** Elimina un mensaje por ID (solo el dueño puede borrar) */
-  deleteMessage: (messageId, requestingPlayerId) => {
-    const idx = zenChatMessages.findIndex(m => m.id === messageId);
-    if (idx === -1) return { success: false, reason: 'Mensaje no encontrado' };
-    if (zenChatMessages[idx].playerId !== requestingPlayerId) {
-      return { success: false, reason: 'No autorizado: solo puedes borrar tus propios mensajes' };
-    }
-    const deleted = zenChatMessages.splice(idx, 1)[0];
-    return { success: true, deleted };
   },
 };
 

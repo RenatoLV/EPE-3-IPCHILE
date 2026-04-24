@@ -18,12 +18,14 @@ import Animated, {
 } from 'react-native-reanimated';
 import { LinearGradient }   from 'expo-linear-gradient';
 import { auth }             from '../services/firebase';
+import apiClient          from '../services/api';
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   updateProfile,
 } from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
 
 export default function LoginScreen() {
   const [email,       setEmail]       = useState('');
@@ -43,6 +45,11 @@ export default function LoginScreen() {
     logoTranslateY.value = withSpring(0, { damping: 12 });
     formOpacity.value    = withDelay(400, withTiming(1, { duration: 700 }));
     formTranslateY.value = withDelay(400, withSpring(0, { damping: 14 }));
+
+    // Paso 4: Despertar el servidor de Render (Cold Start Mitigation)
+    apiClient.get('/health')
+      .then(() => console.log("[Cloud] Servidor Render despertado con éxito"))
+      .catch(() => console.log("[Cloud] Despertando servidor en segundo plano..."));
   }, []);
 
   const logoStyle = useAnimatedStyle(() => ({

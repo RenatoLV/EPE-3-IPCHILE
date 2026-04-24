@@ -1,227 +1,280 @@
 /**
  * screens/SnakeBattleRoyale/SnakeBattleRoyale.js
- * 
- * Snake Battle Royale — Gráficos Neon y Controles por Gestos (Swipe)
+ * * IA Avanzada: Registro único, bots inteligentes y colisiones realistas (quien choca pierde).
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity,
-  Dimensions, Platform
+  Platform, useWindowDimensions
 } from 'react-native';
-import { LinearGradient }       from 'expo-linear-gradient';
-import { useNavigation }        from '@react-navigation/native';
 import { PanGestureHandler }    from 'react-native-gesture-handler';
+import { useNavigation }        from '@react-navigation/native';
+import { useUniversalControls } from '../../hooks/useUniversalControls';
+
 import { database, auth }       from '../../services/firebase';
 import { ref, set, onValue, off, remove, onDisconnect } from 'firebase/database';
-import { snakeAPI }             from '../../services/api';
-
-// ── Adaptación Web/Móvil ──────────────────────────────────────────────────
-const { width: windowWidth, height: windowHeight } = Dimensions.get('window');
-const isWeb = Platform.OS === 'web';
-// Si es web, limitamos el ancho para simular un móvil en el centro de la pantalla
-const W = isWeb ? Math.min(windowWidth, 480) : windowWidth;
-const H = isWeb ? windowHeight : windowHeight;
-
-const CELL_SIZE     = 18;
-const GRID_COLS     = Math.floor(W / CELL_SIZE);
-const GRID_ROWS     = 30;
-const TICK_MS       = 200;
+import { ApiService }           from '../../services/api';
 
 const DIRS = { UP: [0,-1], DOWN: [0,1], LEFT: [-1,0], RIGHT: [1,0] };
-const MY_COLOR     = '#10b981'; // Neon Green
-const ENEMY_COLORS = ['#f43f5e', '#3b82f6', '#f59e0b', '#d946ef'];
 
 export default function SnakeBattleRoyale() {
-  const navigation  = useNavigation();
-  const user        = auth.currentUser;
-  const playerId    = user?.uid || 'anon';
-  const playerName  = user?.displayName || 'Jugador';
+  const navigation = useNavigation();
+  const user       = auth.currentUser;
+  const playerId   = user?.uid || 'anon';
+  const playerName = user?.displayName || 'Gamer';
 
-  const [gameState,    setGameState]    = useState('lobby'); 
-  const [mySnake,      setMySnake]      = useState([{ x: 5, y: 5 }]);
-  const [food,         setFood]         = useState({ x: 10, y: 10 });
-  const [direction,    setDirection]    = useState(DIRS.RIGHT);
-  const [safeZone,     setSafeZone]     = useState({ top: 0, left: 0, right: GRID_COLS - 1, bottom: GRID_ROWS - 1 });
-  const [otherPlayers, setOtherPlayers] = useState({});
-  const [leaderboard,  setLeaderboard]  = useState([]);
-  const [myScore,      setMyScore]      = useState(0);
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const isWeb = Platform.OS === 'web';
+  const W = isWeb ? Math.min(windowWidth * 0.8, 600) : windowWidth;
+  const H = windowHeight;
+
+  const GRID_COLS     = 21; 
+  const GRID_ROWS     = 25;
+  const CELL_SIZE     = Math.floor((W * 0.95) / GRID_COLS);
+  const TICK_MS       = 140; 
+
+  const [gameState, setGameState] = useState('lobby'); 
+  const [mySnake,   setMySnake]   = useState([{ x: 10, y: 7 }, { x: 10, y: 8 }]);
+  const [foods,     setFoods]     = useState([{ x: 5, y: 5 }, { x: 15, y: 15 }]); 
+  const [bots,      setBots]      = useState([]); 
+  const [myScore,   setMyScore]   = useState(0);
+  const [leaderboard, setLeaderboard] = useState([]);
   
-  const dirRef    = useRef(DIRS.RIGHT);
-  const snakeRef  = useRef([{ x: 5, y: 5 }]);
-  const gameRef   = useRef(null);
+  const dirRef    = useRef(DIRS.UP);
+  const snakeRef  = useRef([{ x: 10, y: 7 }, { x: 10, y: 8 }]);
+  const botsRef   = useRef([]);
+  const foodsRef  = useRef([{ x: 5, y: 5 }, { x: 15, y: 15 }]);
   const tickTimer = useRef(null);
+  const gameRef   = useRef(null);
 
   useEffect(() => {
-    snakeAPI.getLeaderboard(5).then(res => setLeaderboard(res.data || [])).catch(() => {});
+    ApiService.getLeaderboard().then(data => setLeaderboard(data || [])).catch(() => {});
+  }, [gameState]);
+
+  const handleKeyboardMove = useCallback((dirStr) => {
+    const cur = dirRef.current;
+    if (dirStr === 'UP' && cur !== DIRS.DOWN)    dirRef.current = DIRS.UP;
+    else if (dirStr === 'DOWN' && cur !== DIRS.UP)    dirRef.current = DIRS.DOWN;
+    else if (dirStr === 'LEFT' && cur !== DIRS.RIGHT)   dirRef.current = DIRS.LEFT;
+    else if (dirStr === 'RIGHT' && cur !== DIRS.LEFT)  dirRef.current = DIRS.RIGHT;
   }, []);
 
-  useEffect(() => {
-    const roomRef = ref(database, 'snake/room1/players');
-    const unsub = onValue(roomRef, (snapshot) => {
-      const data = snapshot.val() || {};
-      const others = Object.fromEntries(Object.entries(data).filter(([id]) => id !== playerId));
-      setOtherPlayers(others);
-    });
-    return () => off(roomRef, 'value', unsub);
-  }, []);
+  useUniversalControls(handleKeyboardMove);
 
   useEffect(() => {
     if (gameState !== 'playing') return;
-    gameRef.current = ref(database, `snake/room1/players/${playerId}`);
-    onDisconnect(gameRef.current).remove();
-    return () => { if (gameRef.current) remove(gameRef.current); };
+    const botTimer = setTimeout(() => {
+      if (botsRef.current.length === 0) {
+        const newBots = [
+          { id: 'bot_alpha', snake: [{x: 2, y: 2}, {x: 1, y: 2}], dir: DIRS.RIGHT, color: '#f43f5e' },
+          { id: 'bot_beta',  snake: [{x: GRID_COLS-3, y: GRID_ROWS-3}, {x: GRID_COLS-2, y: GRID_ROWS-3}], dir: DIRS.LEFT, color: '#3b82f6' }
+        ];
+        botsRef.current = newBots;
+        setBots(newBots);
+      }
+    }, 2000);
+    return () => clearTimeout(botTimer);
   }, [gameState]);
 
   useEffect(() => {
     if (gameState !== 'playing') return;
     tickTimer.current = setInterval(gameTick, TICK_MS);
     return () => clearInterval(tickTimer.current);
-  }, [gameState, food]);
+  }, [gameState]);
 
   useEffect(() => {
     if (gameState !== 'playing') return;
-    const zoneTimer = setInterval(() => {
-      setSafeZone(prev => ({
-        top:    Math.min(prev.top + 1,    GRID_ROWS / 2 - 1),
-        left:   Math.min(prev.left + 1,   GRID_COLS / 2 - 1),
-        right:  Math.max(prev.right - 1,  GRID_COLS / 2),
-        bottom: Math.max(prev.bottom - 1, GRID_ROWS / 2),
-      }));
-    }, 15000);
-    return () => clearInterval(zoneTimer);
+    gameRef.current = ref(database, `snake/room_retro/players/${playerId}`);
+    onDisconnect(gameRef.current).remove();
+    return () => { if (gameRef.current) remove(gameRef.current); };
   }, [gameState]);
+
+  const generarComida = () => ({
+    x: Math.floor(Math.random() * GRID_COLS),
+    y: Math.floor(Math.random() * GRID_ROWS)
+  });
 
   const gameTick = useCallback(() => {
     const current = snakeRef.current;
     const dir     = dirRef.current;
-    const newHead = { x: current[0].x + dir[0], y: current[0].y + dir[1] };
-    const sz = safeZone;
-    const hitWall = (newHead.x < sz.left || newHead.x > sz.right || newHead.y < sz.top || newHead.y > sz.bottom);
-    const hitSelf = current.some(seg => seg.x === newHead.x && seg.y === newHead.y);
+    const head    = current[0];
+    const newHead = { x: head.x + dir[0], y: head.y + dir[1] };
 
-    if (hitWall || hitSelf) return handleDeath();
+    // --- 1. Lógica de Bots (IA Avanzada) ---
+    let currentBots = [...botsRef.current];
+    let nextFoods = [...foodsRef.current];
+    let foodChanged = false;
 
-    const ate = newHead.x === food.x && newHead.y === food.y;
-    const newSnake = ate ? [newHead, ...current] : [newHead, ...current.slice(0, -1)];
+    currentBots = currentBots.map(bot => {
+      const bHead = bot.snake[0];
+      const target = nextFoods[0];
+      
+      const possibleDirs = Object.values(DIRS).filter(d => {
+        if (d[0] === -bot.dir[0] && d[1] === -bot.dir[1]) return false;
+        const nX = bHead.x + d[0];
+        const nY = bHead.y + d[1];
+        if (nX < 0 || nX >= GRID_COLS || nY < 0 || nY >= GRID_ROWS) return false;
+        // Evitar su cuerpo
+        if (bot.snake.some(s => s.x === nX && s.y === nY)) return false;
+        // Evitar al Jugador
+        if (snakeRef.current.some(s => s.x === nX && s.y === nY)) return false;
+        // Evitar a otros bots
+        if (botsRef.current.some(other => other.id !== bot.id && other.snake.some(s => s.x === nX && s.y === nY))) return false;
+        return true;
+      });
 
-    if (ate) {
-      setFood({ x: Math.floor(Math.random() * GRID_COLS), y: Math.floor(Math.random() * GRID_ROWS) });
-      setMyScore(prev => prev + 10 * newSnake.length);
+      let chosenDir = bot.dir;
+      if (possibleDirs.length > 0) {
+        chosenDir = possibleDirs.sort((a, b) => {
+          const distA = Math.abs((bHead.x + a[0]) - target.x) + Math.abs((bHead.y + a[1]) - target.y);
+          const distB = Math.abs((bHead.x + b[0]) - target.x) + Math.abs((bHead.y + b[1]) - target.y);
+          return distA - distB;
+        })[0];
+      }
+
+      const nextBH = { x: bHead.x + chosenDir[0], y: bHead.y + chosenDir[1] };
+      
+      // Colisión de Bot (Quien choca pierde)
+      const hitWall = (nextBH.x < 0 || nextBH.x >= GRID_COLS || nextBH.y < 0 || nextBH.y >= GRID_ROWS);
+      const hitPlayer = snakeRef.current.some(s => s.x === nextBH.x && s.y === nextBH.y);
+      const hitOtherBot = botsRef.current.some(other => other.id !== bot.id && other.snake.some(s => s.x === nextBH.x && s.y === nextBH.y));
+      
+      if (hitWall || hitPlayer || hitOtherBot) {
+        // Respawn instantáneo del bot si muere
+        return { ...bot, snake: [{x: Math.floor(Math.random()*GRID_COLS), y: Math.floor(Math.random()*GRID_ROWS)}], dir: DIRS.UP };
+      }
+
+      const ateIdx = nextFoods.findIndex(f => f.x === nextBH.x && f.y === nextBH.y);
+      if (ateIdx !== -1) {
+        nextFoods[ateIdx] = generarComida();
+        foodChanged = true;
+        return { ...bot, snake: [nextBH, ...bot.snake], dir: chosenDir };
+      }
+      return { ...bot, snake: [nextBH, ...bot.snake.slice(0, -1)], dir: chosenDir };
+    });
+
+    if (foodChanged) {
+      foodsRef.current = nextFoods;
+      setFoods(nextFoods);
+    }
+    botsRef.current = currentBots;
+    setBots(currentBots);
+
+    // --- 2. Lógica del Jugador (Quien choca pierde) ---
+    const hitWallP = (newHead.x < 0 || newHead.x >= GRID_COLS || newHead.y < 0 || newHead.y >= GRID_ROWS);
+    const hitSelfP = current.slice(0, -1).some(seg => seg.x === newHead.x && seg.y === newHead.y);
+    const hitBotP  = currentBots.some(bot => bot.snake.some(s => s.x === newHead.x && s.y === newHead.y));
+
+    if (hitWallP || hitSelfP || hitBotP) return handleDeath();
+
+    const ateIdxP = nextFoods.findIndex(f => f.x === newHead.x && f.y === newHead.y);
+    const newSnakeP = ateIdxP !== -1 ? [newHead, ...current] : [newHead, ...current.slice(0, -1)];
+
+    if (ateIdxP !== -1) {
+      const finalFoods = [...nextFoods];
+      finalFoods[ateIdxP] = generarComida();
+      foodsRef.current = finalFoods;
+      setFoods(finalFoods);
+      setMyScore(prev => prev + 15);
     }
 
-    snakeRef.current = newSnake;
-    setMySnake([...newSnake]);
+    snakeRef.current = newSnakeP;
+    setMySnake(newSnakeP);
 
     if (gameRef.current) {
-      set(gameRef.current, { playerId, playerName, snake: newSnake, score: myScore, color: MY_COLOR, updatedAt: Date.now() });
+      set(gameRef.current, { playerId, playerName, snake: newSnakeP, score: myScore, updatedAt: Date.now() });
     }
-  }, [food, safeZone, myScore]);
+  }, [myScore]);
 
   const handleDeath = async () => {
     clearInterval(tickTimer.current);
     if (gameRef.current) remove(gameRef.current);
-    setGameState('spectator');
-    try { await snakeAPI.saveScore({ playerId, playerName, score: myScore, maxSize: snakeRef.current.length }); } catch(e){}
+    setGameState('gameover');
+    try {
+      await ApiService.postScore({ playerId, playerName, score: myScore, maxSize: snakeRef.current.length });
+    } catch (err) {}
   };
 
-  // ── Controles Touch (Swipe) sin botones ──────────────────────────────────
   const onGestureEvent = (event) => {
     const { translationX, translationY } = event.nativeEvent;
     const cur = dirRef.current;
     if (Math.abs(translationX) > Math.abs(translationY)) {
-      if (translationX > 0 && cur !== DIRS.LEFT)  { dirRef.current = DIRS.RIGHT; setDirection(DIRS.RIGHT); }
-      else if (translationX < 0 && cur !== DIRS.RIGHT) { dirRef.current = DIRS.LEFT; setDirection(DIRS.LEFT); }
+      if (translationX > 20 && cur !== DIRS.LEFT)  dirRef.current = DIRS.RIGHT;
+      else if (translationX < -20 && cur !== DIRS.RIGHT) dirRef.current = DIRS.LEFT;
     } else {
-      if (translationY > 0 && cur !== DIRS.UP)    { dirRef.current = DIRS.DOWN; setDirection(DIRS.DOWN); }
-      else if (translationY < 0 && cur !== DIRS.DOWN)  { dirRef.current = DIRS.UP; setDirection(DIRS.UP); }
+      if (translationY > 20 && cur !== DIRS.UP)    dirRef.current = DIRS.DOWN;
+      else if (translationY < -20 && cur !== DIRS.DOWN)  dirRef.current = DIRS.UP;
     }
   };
 
-  const renderGrid = () => {
-    const cells = [];
-    const snakeSet = new Set(mySnake.map(s => `${s.x},${s.y}`));
-    const enemySets = Object.values(otherPlayers).map((p, i) => ({ set: new Set((p.snake || []).map(s => `${s.x},${s.y}`)), color: ENEMY_COLORS[i % ENEMY_COLORS.length] }));
-
-    for (let y = 0; y < GRID_ROWS; y++) {
-      for (let x = 0; x < GRID_COLS; x++) {
-        const key = `${x},${y}`;
-        const isOutside = (x < safeZone.left || x > safeZone.right || y < safeZone.top || y > safeZone.bottom);
-        let cellStyle = [styles.cell, { width: CELL_SIZE - 2, height: CELL_SIZE - 2 }];
-        
-        if (isOutside) {
-          cellStyle.push(styles.cellDanger);
-        } else if (key === `${food.x},${food.y}`) {
-          cellStyle.push(styles.cellFood);
-        } else if (snakeSet.has(key)) {
-          cellStyle.push({ backgroundColor: MY_COLOR, shadowColor: MY_COLOR, shadowOpacity: 0.8, shadowRadius: 5, elevation: 5 });
-        } else {
-          let enemyColor = null;
-          for (const e of enemySets) if (e.set.has(key)) enemyColor = e.color;
-          if (enemyColor) {
-            cellStyle.push({ backgroundColor: enemyColor, shadowColor: enemyColor, shadowOpacity: 0.8, shadowRadius: 5, elevation: 5 });
-          } else {
-            cellStyle.push(styles.cellEmpty);
-          }
-        }
-        cells.push(<View key={key} style={cellStyle} />);
-      }
-    }
-    return cells;
-  };
-
-  const MainWrapper = isWeb ? View : View;
-
-  if (gameState === 'lobby') {
+  const renderGameEntities = () => {
     return (
-      <View style={styles.webWrapper}>
-        <LinearGradient colors={['#020617', '#0f172a', '#020617']} style={styles.container}>
-          <Text style={styles.titleNeon}>SNAKE BR</Text>
-          <Text style={styles.subtitle}>Desliza tu dedo en la pantalla para moverte.</Text>
-          <View style={styles.glassCard}>
-            <Text style={styles.cardTitle}>🏆 Top Jugadores</Text>
-            {leaderboard.map((entry, i) => (
-              <View key={entry.id} style={styles.leaderRow}>
-                <Text style={styles.leaderRank}>#{i + 1}</Text>
-                <Text style={styles.leaderName}>{entry.playerName}</Text>
-                <Text style={styles.leaderScore}>{entry.score} pts</Text>
-              </View>
-            ))}
+      <>
+        {foods.map((f, i) => (
+          <View key={`f-${i}`} style={[styles.entity, styles.cellFood, { left: f.x * CELL_SIZE, top: f.y * CELL_SIZE, width: CELL_SIZE, height: CELL_SIZE }]}>
+            <View style={styles.foodCrossV} />
+            <View style={styles.foodCrossH} />
           </View>
-          <TouchableOpacity style={styles.btnNeon} onPress={() => { setGameState('playing'); setMyScore(0); snakeRef.current = [{x: 5, y: 5}]; }}>
-            <Text style={styles.btnNeonText}>INICIAR JUEGO</Text>
+        ))}
+        {bots.map(bot => bot.snake.map((s, i) => (
+          <View key={`${bot.id}-${i}`} style={[styles.entity, styles.cellSnake, { backgroundColor: bot.color, left: s.x * CELL_SIZE, top: s.y * CELL_SIZE, width: CELL_SIZE - 1, height: CELL_SIZE - 1 }]} />
+        )))}
+        {mySnake.map((s, i) => (
+          <View key={`my-${i}`} style={[styles.entity, styles.cellSnake, { left: s.x * CELL_SIZE, top: s.y * CELL_SIZE, width: CELL_SIZE - 1, height: CELL_SIZE - 1 }]} />
+        ))}
+      </>
+    );
+  };
+
+  if (gameState === 'lobby' || gameState === 'gameover') {
+    return (
+      <View style={[styles.mainWrapper, { width: windowWidth, height: windowHeight }]}>
+        <View style={[styles.gameLienzo, { width: W, height: H * 0.9 }]}>
+          <Text style={styles.retroTitle}>SNAKE RETRO</Text>
+          {gameState === 'gameover' && (
+            <View style={styles.gameOverBox}>
+              <Text style={styles.retroGameOver}>FIN DEL JUEGO</Text>
+              <Text style={styles.finalScore}>SCORE: {myScore}</Text>
+            </View>
+          )}
+          <View style={styles.leaderboardBox}>
+            <Text style={styles.leaderTitle}>TOP 5 GLOBAL (ÚNICOS)</Text>
+            {leaderboard.length > 0 ? leaderboard.map((entry, i) => (
+              <Text key={i} style={styles.leaderText}>{i+1}. {entry.playerName}: {entry.score}</Text>
+            )) : <Text style={styles.leaderText}>Cargando...</Text>}
+          </View>
+          <TouchableOpacity 
+            style={styles.retroButton} 
+            onPress={() => {
+              setGameState('playing');
+              setMyScore(0);
+              snakeRef.current = [{ x: 10, y: 7 }, { x: 10, y: 8 }];
+              dirRef.current = DIRS.UP;
+              botsRef.current = [];
+              setBots([]);
+            }}>
+            <Text style={styles.retroButtonText}>JUGAR AHORA</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => navigation.goBack()}><Text style={styles.backText}>← Volver</Text></TouchableOpacity>
-        </LinearGradient>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={{marginTop: 20}}>
+            <Text style={styles.backText}>VOLVER</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     );
   }
 
   return (
-    <View style={styles.webWrapper}>
+    <View style={[styles.mainWrapper, { width: windowWidth, height: windowHeight }]}>
       <PanGestureHandler onGestureEvent={onGestureEvent}>
-        <View style={{ flex: 1 }}>
-          <LinearGradient colors={['#020617', '#022c22', '#020617']} style={styles.container}>
-            <View style={styles.hudGlass}>
-              <Text style={styles.hudText}>PUNTOS: {myScore}</Text>
-              <Text style={styles.hudText}>ZONA: {safeZone.right - safeZone.left}x{safeZone.bottom - safeZone.top}</Text>
-              <Text style={styles.hudText}>ALMAS: {Object.keys(otherPlayers).length + 1}</Text>
-            </View>
-            <View style={styles.gridContainer}>
-              <View style={[styles.grid, { width: GRID_COLS * CELL_SIZE, height: GRID_ROWS * CELL_SIZE }]}>
-                {renderGrid()}
-              </View>
-            </View>
-            {gameState === 'spectator' && (
-              <View style={styles.spectatorOverlay}>
-                <Text style={styles.spectatorTitle}>HAS MUERTO</Text>
-                <TouchableOpacity style={styles.btnNeon} onPress={() => navigation.goBack()}>
-                  <Text style={styles.btnNeonText}>SALIR</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-            <Text style={styles.hintText}>Desliza el dedo (Swipe) para cambiar de dirección</Text>
-          </LinearGradient>
+        <View style={[styles.gameLienzo, { width: W, height: H * 0.9 }]}>
+          <View style={[styles.board, { width: GRID_COLS * CELL_SIZE, height: GRID_ROWS * CELL_SIZE }]}>
+            {renderGameEntities()}
+          </View>
+          <View style={styles.footer}>
+            <Text style={styles.scoreText}>PUNTOS: {myScore}</Text>
+            <Text style={styles.scoreText}>BOTS: {bots.length}</Text>
+          </View>
         </View>
       </PanGestureHandler>
     </View>
@@ -229,28 +282,24 @@ export default function SnakeBattleRoyale() {
 }
 
 const styles = StyleSheet.create({
-  webWrapper: { flex: 1, backgroundColor: '#000', alignItems: 'center' },
-  container:  { flex: 1, width: isWeb ? Math.min(Dimensions.get('window').width, 480) : '100%', alignItems: 'center', paddingTop: 50 },
-  titleNeon:  { fontSize: 40, fontWeight: '900', color: '#10b981', textShadowColor: '#10b981', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 15, marginBottom: 10 },
-  subtitle:   { color: '#94a3b8', fontSize: 13, marginBottom: 30, textAlign: 'center', paddingHorizontal: 20 },
-  glassCard:  { backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 20, padding: 20, width: '85%', marginBottom: 30, borderWidth: 1, borderColor: 'rgba(16,185,129,0.2)' },
-  cardTitle:  { color: '#10b981', fontSize: 18, fontWeight: 'bold', marginBottom: 15 },
-  leaderRow:  { flexDirection: 'row', marginBottom: 8 },
-  leaderRank: { color: '#64748b', width: 30 },
-  leaderName: { color: '#f8fafc', flex: 1 },
-  leaderScore:{ color: '#10b981', fontWeight: 'bold' },
-  btnNeon:    { backgroundColor: 'rgba(16,185,129,0.1)', paddingVertical: 15, paddingHorizontal: 40, borderRadius: 30, borderWidth: 2, borderColor: '#10b981', shadowColor: '#10b981', shadowOpacity: 0.8, shadowRadius: 10, elevation: 10, marginBottom: 20 },
-  btnNeonText:{ color: '#10b981', fontSize: 18, fontWeight: '900', letterSpacing: 2 },
-  backText:   { color: '#64748b', fontSize: 14, marginTop: 10 },
-  hudGlass:   { flexDirection: 'row', justifyContent: 'space-between', width: '90%', padding: 15, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 15, marginBottom: 20, borderWidth: 1, borderColor: 'rgba(16,185,129,0.3)' },
-  hudText:    { color: '#10b981', fontSize: 11, fontWeight: 'bold' },
-  gridContainer:{ flex: 1, justifyContent: 'center' },
-  grid:       { flexDirection: 'row', flexWrap: 'wrap', backgroundColor: 'rgba(0,0,0,0.3)', borderWidth: 1, borderColor: 'rgba(16,185,129,0.2)' },
-  cell:       { margin: 1, borderRadius: 4 },
-  cellEmpty:  { backgroundColor: 'rgba(255,255,255,0.02)' },
-  cellDanger: { backgroundColor: 'rgba(244,63,94,0.15)' },
-  cellFood:   { backgroundColor: '#fbbf24', borderRadius: 10, shadowColor: '#fbbf24', shadowOpacity: 1, shadowRadius: 8, elevation: 8 },
-  hintText:   { color: '#64748b', fontSize: 12, marginBottom: 30, opacity: 0.7 },
-  spectatorOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
-  spectatorTitle: { fontSize: 40, fontWeight: '900', color: '#f43f5e', textShadowColor: '#f43f5e', textShadowRadius: 20, marginBottom: 30 }
+  mainWrapper: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
+  gameLienzo: { backgroundColor: '#9bba5a', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderRadius: Platform.OS === 'web' ? 24 : 0, padding: 20 },
+  board: { backgroundColor: '#ac6', borderWidth: 4, borderColor: 'rgba(0,0,0,0.85)', position: 'relative' },
+  entity: { position: 'absolute' },
+  cellSnake: { backgroundColor: 'rgba(0,0,0,0.85)', borderRadius: 2 },
+  cellFood: { justifyContent: 'center', alignItems: 'center' },
+  foodCrossV: { position: 'absolute', width: '25%', height: '75%', backgroundColor: 'rgba(0,0,0,0.85)' },
+  foodCrossH: { position: 'absolute', width: '75%', height: '25%', backgroundColor: 'rgba(0,0,0,0.85)' },
+  footer: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginTop: 20 },
+  scoreText: { fontFamily: 'monospace', fontSize: 20, fontWeight: 'bold', color: 'rgba(0,0,0,0.75)' },
+  retroTitle: { fontFamily: 'monospace', fontSize: 40, fontWeight: 'bold', color: 'rgba(0,0,0,0.75)', marginBottom: 20 },
+  gameOverBox: { alignItems: 'center', marginBottom: 20 },
+  retroGameOver: { fontFamily: 'monospace', fontSize: 24, color: '#7f1d1d', fontWeight: 'bold' },
+  finalScore: { fontSize: 18, color: 'rgba(0,0,0,0.75)', fontWeight: 'bold' },
+  leaderboardBox: { backgroundColor: 'rgba(0,0,0,0.05)', padding: 15, borderRadius: 10, width: '100%', marginBottom: 20 },
+  leaderTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 5, color: 'rgba(0,0,0,0.7)' },
+  leaderText: { fontSize: 14, color: 'rgba(0,0,0,0.6)', fontFamily: 'monospace' },
+  retroButton: { borderWidth: 3, borderColor: 'rgba(0,0,0,0.75)', paddingVertical: 12, paddingHorizontal: 30, backgroundColor: '#ac6' },
+  retroButtonText: { fontSize: 20, fontWeight: 'bold', color: 'rgba(0,0,0,0.75)' },
+  backText: { color: 'rgba(0,0,0,0.5)', textDecorationLine: 'underline' }
 });
