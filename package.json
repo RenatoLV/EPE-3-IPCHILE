@@ -1,0 +1,12 @@
+{
+  "name": "epe3-ipchile-root",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node backend-api/server.js",
+    "postinstall": "cd backend-api && npm install"
+  }
+}
