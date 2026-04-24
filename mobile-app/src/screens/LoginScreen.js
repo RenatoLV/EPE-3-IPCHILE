@@ -1,14 +1,11 @@
 /**
  * screens/LoginScreen.js
- * 
- * Pantalla de Login obligatorio con Firebase Authentication.
- * Soporte para: Email/Password y registro de nuevos usuarios.
- * Diseño oscuro premium con animaciones de entrada (Reanimated).
+ * * Pantalla de Login con animaciones mejoradas y micro-interacciones.
  */
 
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity,
+  View, Text, TextInput, TouchableOpacity, Pressable,
   StyleSheet, KeyboardAvoidingView, Platform,
   Alert, ActivityIndicator,
 } from 'react-native';
@@ -16,9 +13,9 @@ import Animated, {
   useSharedValue, useAnimatedStyle,
   withTiming, withSpring, withDelay, Easing,
 } from 'react-native-reanimated';
-import { LinearGradient }   from 'expo-linear-gradient';
-import { auth }             from '../services/firebase';
-import apiClient          from '../services/api';
+import { LinearGradient } from 'expo-linear-gradient';
+import { auth } from '../services/firebase';
+import apiClient from '../services/api';
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -26,19 +23,20 @@ import {
 } from 'firebase/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-
 export default function LoginScreen() {
   const [email,       setEmail]       = useState('');
   const [password,    setPassword]    = useState('');
   const [displayName, setDisplayName] = useState('');
   const [isRegister,  setIsRegister]  = useState(false);
   const [loading,     setLoading]     = useState(false);
+  const [focusedInput, setFocusedInput] = useState(null); // Nuevo estado para interacciones
 
   // ── Animaciones de entrada ──────────────────────────────────────────────
-  const logoOpacity   = useSharedValue(0);
+  const logoOpacity    = useSharedValue(0);
   const logoTranslateY = useSharedValue(-40);
-  const formOpacity   = useSharedValue(0);
+  const formOpacity    = useSharedValue(0);
   const formTranslateY = useSharedValue(30);
+  const buttonScale    = useSharedValue(1); // Nueva animación para el botón
 
   useEffect(() => {
     logoOpacity.value    = withTiming(1, { duration: 800 });
@@ -46,7 +44,6 @@ export default function LoginScreen() {
     formOpacity.value    = withDelay(400, withTiming(1, { duration: 700 }));
     formTranslateY.value = withDelay(400, withSpring(0, { damping: 14 }));
 
-    // Paso 4: Despertar el servidor de Render (Cold Start Mitigation)
     apiClient.get('/health')
       .then(() => console.log("[Cloud] Servidor Render despertado con éxito"))
       .catch(() => console.log("[Cloud] Despertando servidor en segundo plano..."));
@@ -62,6 +59,10 @@ export default function LoginScreen() {
     transform: [{ translateY: formTranslateY.value }],
   }));
 
+  const buttonAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: buttonScale.value }]
+  }));
+
   // ── Lógica de autenticación ──────────────────────────────────────────────
   const handleAuth = async () => {
     if (!email || !password) {
@@ -71,21 +72,15 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       if (isRegister) {
-        // Registro de nuevo usuario
         const cred = await createUserWithEmailAndPassword(auth, email, password);
-        if (displayName) {
-          await updateProfile(cred.user, { displayName });
-        }
-        // Guarda el token para Axios
+        if (displayName) await updateProfile(cred.user, { displayName });
         const token = await cred.user.getIdToken();
         await AsyncStorage.setItem('@auth_token', token);
       } else {
-        // Login de usuario existente
         const cred = await signInWithEmailAndPassword(auth, email, password);
         const token = await cred.user.getIdToken();
         await AsyncStorage.setItem('@auth_token', token);
       }
-      // AppNavigator detecta el cambio de sesión automáticamente vía onAuthStateChanged
     } catch (error) {
       const mensajes = {
         'auth/user-not-found':     'No existe una cuenta con ese email.',
@@ -101,7 +96,7 @@ export default function LoginScreen() {
   };
 
   return (
-    <LinearGradient colors={['#0a0a1a', '#1a0a2e', '#0d1b2a']} style={styles.container}>
+    <LinearGradient colors={['#050510', '#1a0a2e', '#050a1f']} style={styles.container}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.inner}
@@ -110,7 +105,7 @@ export default function LoginScreen() {
         <Animated.View style={[styles.logoContainer, logoStyle]}>
           <Text style={styles.logoIcon}>🌌</Text>
           <Text style={styles.logoTitle}>AppMovil</Text>
-          <Text style={styles.logoSubtitle}>API Cloud Gaming</Text>
+          <Text style={styles.logoSubtitle}>API CLOUD GAMING</Text>
         </Animated.View>
 
         {/* ── Formulario ────────────────────────────────────────────────── */}
@@ -121,48 +116,57 @@ export default function LoginScreen() {
 
           {isRegister && (
             <TextInput
-              style={styles.input}
+              style={[styles.input, focusedInput === 'name' && styles.inputFocused]}
               placeholder="Nombre de jugador"
-              placeholderTextColor="#555"
+              placeholderTextColor="#777"
               value={displayName}
               onChangeText={setDisplayName}
               autoCapitalize="words"
+              onFocus={() => setFocusedInput('name')}
+              onBlur={() => setFocusedInput(null)}
             />
           )}
 
           <TextInput
-            style={styles.input}
+            style={[styles.input, focusedInput === 'email' && styles.inputFocused]}
             placeholder="Correo electrónico"
-            placeholderTextColor="#555"
+            placeholderTextColor="#777"
             value={email}
             onChangeText={setEmail}
             keyboardType="email-address"
             autoCapitalize="none"
+            onFocus={() => setFocusedInput('email')}
+            onBlur={() => setFocusedInput(null)}
           />
 
           <TextInput
-            style={styles.input}
+            style={[styles.input, focusedInput === 'password' && styles.inputFocused]}
             placeholder="Contraseña"
-            placeholderTextColor="#555"
+            placeholderTextColor="#777"
             value={password}
             onChangeText={setPassword}
             secureTextEntry
+            onFocus={() => setFocusedInput('password')}
+            onBlur={() => setFocusedInput(null)}
           />
 
-          <TouchableOpacity
-            style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={handleAuth}
-            disabled={loading}
-            activeOpacity={0.8}
-          >
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.buttonText}>
-                {isRegister ? '🚀 Registrarse' : '⚡ Entrar al Universo'}
-              </Text>
-            )}
-          </TouchableOpacity>
+          <Animated.View style={buttonAnimatedStyle}>
+            <Pressable
+              style={[styles.button, loading && styles.buttonDisabled]}
+              onPress={handleAuth}
+              disabled={loading}
+              onPressIn={() => (buttonScale.value = withSpring(0.95))}
+              onPressOut={() => (buttonScale.value = withSpring(1))}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.buttonText}>
+                  {isRegister ? '🚀 Registrarse' : '⚡ Entrar al Universo'}
+                </Text>
+              )}
+            </Pressable>
+          </Animated.View>
 
           <TouchableOpacity
             onPress={() => setIsRegister(!isRegister)}
@@ -184,42 +188,51 @@ const styles = StyleSheet.create({
   container:     { flex: 1 },
   inner:         { flex: 1, justifyContent: 'center', paddingHorizontal: 28 },
   logoContainer: { alignItems: 'center', marginBottom: 40 },
-  logoIcon:      { fontSize: 64 },
-  logoTitle:     { fontSize: 36, fontWeight: '900', color: '#e879f9', letterSpacing: 2, marginTop: 8 },
-  logoSubtitle:  { fontSize: 14, color: '#7c3aed', letterSpacing: 4, marginTop: 4 },
+  logoIcon:      { fontSize: 72, textShadowColor: '#e879f9', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 20 },
+  logoTitle:     { fontSize: 38, fontWeight: '900', color: '#e879f9', letterSpacing: 2, marginTop: 8 },
+  logoSubtitle:  { fontSize: 14, color: '#a855f7', letterSpacing: 4, marginTop: 4, fontWeight: '600' },
   formCard: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: 'rgba(20, 10, 40, 0.4)', // Fondo de cristal más profundo
     borderRadius: 24,
     padding: 28,
-    borderWidth: 1,
-    borderColor: 'rgba(124,58,237,0.3)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(124,58,237,0.4)',
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 10,
   },
-  formTitle: { fontSize: 20, fontWeight: '700', color: '#f3f4f6', marginBottom: 20, textAlign: 'center' },
+  formTitle: { fontSize: 22, fontWeight: '700', color: '#ffffff', marginBottom: 24, textAlign: 'center' },
   input: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 14,
     paddingHorizontal: 16,
-    paddingVertical: 14,
-    color: '#f3f4f6',
-    fontSize: 15,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(124,58,237,0.2)',
+    paddingVertical: 16,
+    color: '#ffffff',
+    fontSize: 16,
+    marginBottom: 16,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.05)',
+  },
+  inputFocused: {
+    borderColor: '#e879f9', // Brillo cuando el usuario hace tap
+    backgroundColor: 'rgba(255,255,255,0.1)',
   },
   button: {
-    backgroundColor: '#7c3aed',
+    backgroundColor: '#9333ea',
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: 'center',
-    marginTop: 8,
-    shadowColor: '#7c3aed',
+    marginTop: 10,
+    shadowColor: '#e879f9',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 12,
+    shadowOpacity: 0.6,
+    shadowRadius: 15,
     elevation: 8,
   },
   buttonDisabled: { opacity: 0.6 },
-  buttonText:     { color: '#fff', fontSize: 16, fontWeight: '700', letterSpacing: 1 },
-  switchBtn:      { marginTop: 20, alignItems: 'center' },
-  switchText:     { color: '#a78bfa', fontSize: 13 },
+  buttonText:     { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 1 },
+  switchBtn:      { marginTop: 24, alignItems: 'center' },
+  switchText:     { color: '#c084fc', fontSize: 14, fontWeight: '500' },
 });

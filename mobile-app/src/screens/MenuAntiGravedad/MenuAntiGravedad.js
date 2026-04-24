@@ -1,21 +1,13 @@
 /**
  * screens/MenuAntiGravedad/MenuAntiGravedad.js
- * 
- * Menú principal con física de gravedad cero.
- * Tres "planetas" flotantes representan cada juego.
- * El usuario puede arrastrarlos (PanGesture) y al soltarlos
- * rebotan con física de resorte. Al tocarlos navegan al juego.
- * 
- * Tecnología: react-native-reanimated + react-native-gesture-handler
+ * * Menú principal interactivo con fondo de estrellas animadas.
  */
 
-import React, { useCallback } from 'react';
+import React, { useEffect } from 'react';
 import { StyleSheet, View, Text, Dimensions, TouchableOpacity } from 'react-native';
 import Animated, {
-  useSharedValue, useAnimatedStyle, withSpring,
-  useAnimatedGestureHandler, runOnJS,
+  useSharedValue, useAnimatedStyle, withTiming, withRepeat, withSequence, Easing
 } from 'react-native-reanimated';
-import { PanGestureHandler } from 'react-native-gesture-handler';
 import { LinearGradient }     from 'expo-linear-gradient';
 import { useNavigation }      from '@react-navigation/native';
 import { auth }               from '../../services/firebase';
@@ -24,46 +16,65 @@ import AsyncStorage           from '@react-native-async-storage/async-storage';
 import FloatingPlanet         from '../../components/FloatingPlanet';
 
 const { width: W, height: H } = Dimensions.get('window');
+const CX = W / 2;
+const CY = H / 2;
 
-// ── Configuración de cada planeta/juego ─────────────────────────────────────
 const GAMES = [
   {
     id: 'snake',
     route: 'SnakeBattleRoyale',
-    label: 'Snake\nBattle Royale',
+    label: 'Snake\nBattle',
     emoji: '🐍',
-    color: ['#16a34a', '#052e16'],
-    glowColor: '#16a34a',
-    initialX: W * 0.15,
-    initialY: H * 0.25,
-    size: 130,
+    color: ['#10b981', '#064e3b'],
+    glowColor: '#10b981',
+    initialX: CX - 80,
+    initialY: CY - 120,
+    size: 120,
   },
   {
     id: 'wildwest',
     route: 'WildWest',
-    label: 'Wild West\nQuick Draw',
+    label: 'Wild\nWest',
     emoji: '🤠',
-    color: ['#d97706', '#451a03'],
-    glowColor: '#d97706',
-    initialX: W * 0.55,
-    initialY: H * 0.35,
-    size: 120,
+    color: ['#f59e0b', '#78350f'],
+    glowColor: '#f59e0b',
+    initialX: CX + 90,
+    initialY: CY,
+    size: 110,
   },
   {
     id: 'zen',
     route: 'ZenWorld',
-    label: 'Mundo Zen\nVirtual',
+    label: 'Zen\nWorld',
     emoji: '🌸',
-    color: ['#7c3aed', '#1e0a3a'],
-    glowColor: '#a855f7',
-    initialX: W * 0.25,
-    initialY: H * 0.58,
-    size: 115,
+    color: ['#8b5cf6', '#4c1d95'],
+    glowColor: '#a78bfa',
+    initialX: CX - 70,
+    initialY: CY + 130,
+    size: 105,
   },
 ];
 
 export default function MenuAntiGravedad() {
   const navigation = useNavigation();
+
+  // Animación de pulsación para el botón de salir
+  const pulseAnim = useSharedValue(1);
+
+  useEffect(() => {
+    pulseAnim.value = withRepeat(
+      withSequence(
+        withTiming(1.05, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
+        withTiming(1, { duration: 1000, easing: Easing.inOut(Easing.ease) })
+      ),
+      -1,
+      true
+    );
+  }, []);
+
+  const logoutAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: pulseAnim.value }]
+  }));
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -71,17 +82,14 @@ export default function MenuAntiGravedad() {
   };
 
   return (
-    <LinearGradient colors={['#000010', '#06011a', '#010820']} style={styles.container}>
-      {/* ── Estrellas decorativas ──────────────────────────────────────── */}
-      <StarField />
+    <LinearGradient colors={['#000008', '#08021c', '#020b24']} style={styles.container}>
+      <AnimatedStarField />
 
-      {/* ── Título flotante ──────────────────────────────────────────────── */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>🌌 Anti-Gravedad</Text>
         <Text style={styles.headerSub}>Arrastra los planetas · Toca para jugar</Text>
       </View>
 
-      {/* ── Planetas/Juegos flotantes ─────────────────────────────────────── */}
       {GAMES.map((game) => (
         <FloatingPlanet
           key={game.id}
@@ -90,40 +98,66 @@ export default function MenuAntiGravedad() {
         />
       ))}
 
-      {/* ── Botón de cierre de sesión ─────────────────────────────────────── */}
-      <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
-        <Text style={styles.logoutText}>⚡ Salir</Text>
-      </TouchableOpacity>
+      <Animated.View style={[styles.logoutBtnContainer, logoutAnimatedStyle]}>
+        <TouchableOpacity activeOpacity={0.7} style={styles.logoutBtn} onPress={handleLogout}>
+          <Text style={styles.logoutText}>⚡ Salir de órbita</Text>
+        </TouchableOpacity>
+      </Animated.View>
     </LinearGradient>
   );
 }
 
-// ── Componente de campo de estrellas (fondo decorativo) ────────────────────
-function StarField() {
-  const stars = Array.from({ length: 60 }, (_, i) => ({
+// ── Componente de Estrella Individual Animada ──────────────────────────────
+function AnimatedStar({ star }) {
+  const opacity = useSharedValue(star.opacity);
+
+  useEffect(() => {
+    // Hace que cada estrella cambie su opacidad continuamente
+    opacity.value = withRepeat(
+      withTiming(star.opacity * 0.2, { duration: 1500 + Math.random() * 2000 }),
+      -1, // Infinito
+      true // Reversa
+    );
+  }, []);
+
+  const animatedStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
+
+  return (
+    <Animated.View
+      style={[
+        {
+          position: 'absolute',
+          left: `${star.x}%`,
+          top: `${star.y}%`,
+          width: star.size,
+          height: star.size,
+          borderRadius: star.size / 2,
+          backgroundColor: '#ffffff',
+          shadowColor: '#fff',
+          shadowOffset: { width: 0, height: 0 },
+          shadowOpacity: 0.8,
+          shadowRadius: star.size,
+        },
+        animatedStyle
+      ]}
+    />
+  );
+}
+
+// ── Componente de campo de estrellas ───────────────────────────────────────
+function AnimatedStarField() {
+  const stars = React.useMemo(() => Array.from({ length: 70 }, (_, i) => ({
     id: i,
     x: Math.random() * 100,
     y: Math.random() * 100,
-    size: Math.random() * 2.5 + 0.5,
-    opacity: Math.random() * 0.7 + 0.2,
-  }));
+    size: Math.random() * 3 + 0.5,
+    opacity: Math.random() * 0.8 + 0.2,
+  })), []);
 
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
       {stars.map((star) => (
-        <View
-          key={star.id}
-          style={{
-            position: 'absolute',
-            left:    `${star.x}%`,
-            top:     `${star.y}%`,
-            width:   star.size,
-            height:  star.size,
-            borderRadius: star.size / 2,
-            backgroundColor: '#ffffff',
-            opacity: star.opacity,
-          }}
-        />
+        <AnimatedStar key={star.id} star={star} />
       ))}
     </View>
   );
@@ -133,32 +167,38 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   header: {
     position: 'absolute',
-    top: 60,
+    top: 70,
     left: 0,
     right: 0,
     alignItems: 'center',
     zIndex: 10,
   },
   headerTitle: {
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: '900',
-    color: '#f0abfc',
+    color: '#ffffff',
     letterSpacing: 2,
-    textShadowColor: '#a855f7',
+    textShadowColor: '#c084fc',
     textShadowOffset: { width: 0, height: 0 },
-    textShadowRadius: 12,
+    textShadowRadius: 16,
   },
-  headerSub: { fontSize: 12, color: '#6b7280', marginTop: 6, letterSpacing: 1 },
-  logoutBtn: {
+  headerSub: { fontSize: 14, color: '#a78bfa', marginTop: 8, letterSpacing: 1.5, fontWeight: '500' },
+  logoutBtnContainer: {
     position: 'absolute',
-    bottom: 40,
+    bottom: 45,
     right: 24,
-    backgroundColor: 'rgba(239,68,68,0.15)',
-    borderRadius: 20,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.3)',
   },
-  logoutText: { color: '#ef4444', fontSize: 13, fontWeight: '600' },
+  logoutBtn: {
+    backgroundColor: 'rgba(239,68,68,0.2)',
+    borderRadius: 24,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderWidth: 1.5,
+    borderColor: 'rgba(239,68,68,0.5)',
+    shadowColor: '#ef4444',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+  },
+  logoutText: { color: '#fca5a5', fontSize: 14, fontWeight: '700', letterSpacing: 1 },
 });

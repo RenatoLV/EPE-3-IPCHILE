@@ -22,6 +22,7 @@ const wildWestRoutes = require('./routes/wildwest.routes');
 const zenRoutes     = require('./routes/zen.routes');
 
 const app  = express();
+app.set('trust proxy', 1); // Confía en el primer proxy (Render)
 const PORT = process.env.PORT || 3001;
 
 // ── Middlewares de Seguridad ────────────────────────────────────────────────

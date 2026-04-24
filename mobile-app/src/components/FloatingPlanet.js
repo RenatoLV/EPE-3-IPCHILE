@@ -1,159 +1,157 @@
 /**
  * components/FloatingPlanet.js
- * 
- * Componente reutilizable de planeta flotante con:
- *  - Arrastre libre (PanGestureHandler)
- *  - Rebote con física de resorte al soltar (withSpring)
- *  - Animación de flotación continua (oscilación suave)
- *  - Glow visual (sombra coloreada)
- *  - Navegación al tocar
+ * Planeta con física de atracción al centro de gravedad.
  */
 
 import React, { useEffect } from 'react';
-import { StyleSheet, Text, TouchableOpacity, Dimensions } from 'react-native';
+import { StyleSheet, Text, Dimensions, Pressable } from 'react-native';
 import Animated, {
-  useSharedValue, useAnimatedStyle, withSpring,
-  withRepeat, withTiming, withSequence, Easing,
-  useAnimatedGestureHandler, runOnJS,
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withRepeat,
+  withSequence,
+  withTiming,
+  withDelay,
+  useAnimatedGestureHandler,
+  interpolate,
+  Extrapolate,
 } from 'react-native-reanimated';
 import { PanGestureHandler } from 'react-native-gesture-handler';
-import { LinearGradient }    from 'expo-linear-gradient';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const { width: W, height: H } = Dimensions.get('window');
-
-// Configuración del resorte para el rebote al soltar
-const SPRING_CONFIG = {
-  damping: 15,
-  stiffness: 120,
-  mass: 1.2,
-  overshootClamping: false,
-};
+const CENTER_X = W / 2;
+const CENTER_Y = H / 2;
 
 export default function FloatingPlanet({ game, onPress }) {
-  // ── Posición actual (gesto de arrastre) ──────────────────────────────────
-  const translateX = useSharedValue(game.initialX - game.size / 2);
-  const translateY = useSharedValue(game.initialY - game.size / 2);
-
-  // ── Posición base (para rebote al soltar) ────────────────────────────────
-  const baseX = game.initialX - game.size / 2;
-  const baseY = game.initialY - game.size / 2;
-
-  // ── Escala para feedback táctil ──────────────────────────────────────────
+  // Posición relativa al centro de la pantalla
+  const x = useSharedValue(game.initialX - CENTER_X);
+  const y = useSharedValue(game.initialY - CENTER_Y);
   const scale = useSharedValue(1);
+  const isDragging = useSharedValue(false);
 
-  // ── Oscilación de flotación continua ─────────────────────────────────────
-  const floatY = useSharedValue(0);
+  // 1. Animación de "Orbital sutil" (Flotación constante)
   useEffect(() => {
-    // Cada planeta tiene una fase distinta para que no floten sincronizados
-    const delay = (game.initialX % 1000) * 2;
-    floatY.value = withRepeat(
+    const randomDelay = Math.random() * 1000;
+    x.value = withDelay(randomDelay, withRepeat(
       withSequence(
-        withTiming(12, { duration: 2000 + delay, easing: Easing.inOut(Easing.sin) }),
-        withTiming(-12, { duration: 2000 + delay, easing: Easing.inOut(Easing.sin) }),
-      ),
-      -1, // infinito
-      true,
-    );
+        withTiming(x.value + 5, { duration: 2500 }),
+        withTiming(x.value - 5, { duration: 2500 })
+      ), -1, true
+    ));
   }, []);
 
-  // ── Handler del gesto de arrastre (worklet) ──────────────────────────────
+  // 2. Manejo de Gestos con Física de Regreso al Centro
   const gestureHandler = useAnimatedGestureHandler({
     onStart: (_, ctx) => {
-      // Guarda la posición al inicio del arrastre
-      ctx.startX = translateX.value;
-      ctx.startY = translateY.value;
-      scale.value = withSpring(1.1); // escala ligera al agarrar
+      ctx.startX = x.value;
+      ctx.startY = y.value;
+      scale.value = withSpring(1.25);
+      isDragging.value = true;
     },
     onActive: (event, ctx) => {
-      // Actualiza posición siguiendo el dedo
-      translateX.value = ctx.startX + event.translationX;
-      translateY.value = ctx.startY + event.translationY;
+      x.value = ctx.startX + event.translationX;
+      y.value = ctx.startY + event.translationY;
     },
-    onEnd: (event) => {
-      scale.value = withSpring(1); // restaura escala
-
-      // ── Comportamiento de rebote en los bordes ──────────────────────────
-      const finalX = translateX.value;
-      const finalY = translateY.value;
-      const maxX = W - game.size;
-      const maxY = H - game.size;
-
-      // Si se lanza con velocidad alta, simula rebote en bordes
-      if (Math.abs(event.velocityX) > 500 || Math.abs(event.velocityY) > 500) {
-        const targetX = Math.max(0, Math.min(maxX, finalX + event.velocityX * 0.1));
-        const targetY = Math.max(0, Math.min(maxY, finalY + event.velocityY * 0.1));
-        translateX.value = withSpring(targetX, SPRING_CONFIG);
-        translateY.value = withSpring(targetY, SPRING_CONFIG);
-      } else {
-        // Si se suelta sin mucha velocidad, vuelve a su posición base
-        translateX.value = withSpring(baseX, SPRING_CONFIG);
-        translateY.value = withSpring(baseY, SPRING_CONFIG);
-      }
+    onEnd: () => {
+      isDragging.value = false;
+      scale.value = withSpring(1);
+      
+      // EFECTO GRAVEDAD: Regresa a su "Estación" asignada cerca del centro
+      // Usamos un spring con damping bajo para un rebote "gomoso"
+      x.value = withSpring(game.initialX - CENTER_X, { damping: 12, stiffness: 90 });
+      y.value = withSpring(game.initialY - CENTER_Y, { damping: 12, stiffness: 90 });
     },
   });
 
-  // ── Estilos animados ──────────────────────────────────────────────────────
-  const animStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: translateX.value },
-      { translateY: translateY.value + floatY.value },
-      { scale: scale.value },
-    ],
+  // 3. Estilos Animados Dinámicos (UI Móvil Premium)
+  const animatedStyle = useAnimatedStyle(() => {
+    // Calculamos qué tan lejos está del centro absoluto
+    const distance = Math.sqrt(Math.pow(x.value, 2) + Math.pow(y.value, 2));
+    
+    // Si se aleja mucho, se encoge un poco (efecto de perspectiva)
+    const perspectiveScale = interpolate(
+      distance,
+      [0, 300],
+      [1, 0.7],
+      Extrapolate.CLAMP
+    );
+
+    return {
+      transform: [
+        { translateX: x.value + CENTER_X - game.size / 2 },
+        { translateY: y.value + CENTER_Y - game.size / 2 },
+        { scale: scale.value * perspectiveScale },
+      ],
+    };
+  });
+
+  const glowStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(scale.value, [1, 1.25], [0.4, 0.8]),
+    transform: [{ scale: withRepeat(withTiming(1.1, { duration: 1500 }), -1, true) }]
   }));
 
   return (
     <PanGestureHandler onGestureEvent={gestureHandler}>
-      <Animated.View style={[styles.wrapper, { width: game.size, height: game.size }, animStyle]}>
-        <TouchableOpacity
-          onPress={onPress}
-          activeOpacity={0.85}
-          style={styles.touch}
-        >
+      <Animated.View style={[styles.container, animatedStyle]}>
+        <Pressable onPress={onPress} style={styles.pressable}>
+          
+          {/* Aura de Gravedad */}
+          <Animated.View 
+            style={[
+              styles.glow, 
+              { backgroundColor: game.glowColor, shadowColor: game.glowColor },
+              glowStyle
+            ]} 
+          />
+          
+          {/* Cuerpo del Planeta */}
           <LinearGradient
             colors={game.color}
-            style={[
-              styles.planet,
-              { width: game.size, height: game.size, borderRadius: game.size / 2 },
-              // Glow effect via shadow
-              {
-                shadowColor: game.glowColor,
-                shadowOffset: { width: 0, height: 0 },
-                shadowOpacity: 0.8,
-                shadowRadius: 24,
-                elevation: 16,
-              },
-            ]}
+            style={[styles.planet, { width: game.size, height: game.size, borderRadius: game.size / 2 }]}
           >
-            <Text style={styles.emoji}>{game.emoji}</Text>
+            <Text style={[styles.emoji, { fontSize: game.size * 0.35 }]}>{game.emoji}</Text>
             <Text style={styles.label}>{game.label}</Text>
           </LinearGradient>
-        </TouchableOpacity>
+          
+        </Pressable>
       </Animated.View>
     </PanGestureHandler>
   );
 }
 
 const styles = StyleSheet.create({
-  wrapper:  { position: 'absolute' },
-  touch:    { flex: 1 },
+  container: { position: 'absolute' },
+  pressable: { alignItems: 'center', justifyContent: 'center' },
   planet: {
-    flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1.5,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderColor: 'rgba(255,255,255,0.3)',
+    elevation: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
   },
-  emoji:  { fontSize: 36 },
+  glow: {
+    position: 'absolute',
+    width: '115%',
+    height: '115%',
+    borderRadius: 999,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 20,
+    zIndex: -1,
+  },
+  emoji: { marginBottom: 4 },
   label: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#f9fafb',
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '900',
     textAlign: 'center',
-    marginTop: 6,
+    textTransform: 'uppercase',
     letterSpacing: 0.5,
-    lineHeight: 16,
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 4,
   },
 });
